@@ -1,12 +1,6 @@
 /*
-    Video: https://www.youtube.com/watch?v=oCMOYS71NIU
-    Based on Neil Kolban example for IDF: https://github.com/nkolban/esp32-snippets/blob/master/cpp_utils/tests/BLE%20Tests/SampleNotify.cpp
-    Ported to Arduino ESP32 by Evandro Copercini
-    updated by chegewara
-
-   Create a BLE server that, once we receive a connection, will send periodic notifications.
-   The service advertises itself as: 4fafc201-1fb5-459e-8fcc-c5c9c331914b
-   And has a characteristic of: beb5483e-36e1-4688-b7f5-ea07361b26a8
+  Tolentino Cotesta - cotestatnt@yahoo.com
+  https://github.com/cotestatnt/esp32-dht-app-inventor
 
    The design of creating the BLE server is:
    1. Create a BLE Server
@@ -15,9 +9,6 @@
    4. Create a BLE Descriptor on the characteristic
    5. Start the service.
    6. Start advertising.
-
-   A connect hander associated with the server starts a background task that performs notification
-   every couple of seconds.
 */
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -25,16 +16,19 @@
 #include <BLE2902.h>
 
 
+#include "DHT.h"  // https://github.com/adafruit/DHT-sensor-library
+#define DHTPIN 15         // Digital pin connected to the DHT sensor
+#define DHTTYPE DHT22     // DHT 22  (AM2302), AM2321
+//#define DHTTYPE DHT11   // DHT 11
+
+DHT dht(DHTPIN, DHTTYPE);
+
 // Definite dal protocollo GATT/BLE
 const uint16_t temperatureUUID  = 0x2A6E;
 const uint16_t humidityUUID     = 0x2A6F;
 const uint16_t environmentUUID  = 0x181A;
 const uint16_t descriptionUUID   = 0x2901;
 
-
-// Variabili che saranno esposte dal servizio BLE
-float temperature = -15.0F;
-float humidity = 45.8F;
 
 // Definizione del server BLE
 BLEServer* pServer = NULL;
@@ -66,6 +60,7 @@ class MyServerCallbacks: public BLEServerCallbacks {
 
 void setup() {
   Serial.begin(115200);
+  dht.begin();
 
   // Create the BLE Device
   BLEDevice::init("ESP32");
@@ -102,29 +97,39 @@ void setup() {
 
 void loop() {
 
-  // notify changed value
-  if (deviceConnected) {
+
+  // notify changed value every 1000 millisencods
+  static uint32_t updateTime;
+  if (deviceConnected && millis() - updateTime > 1000) {
+    updateTime = millis();
+    static int temperature, humidity;
+    float val;
 
     // Aggiona valori di temperatura e umidità se il client è connesso (es. smartphone)
-    // temperature = dht.getTemperature();
-    // humidity = dht.getHumidity();
+    val = dht.readTemperature();
+    if(! isnan(val))
+      temperature = (int)(val *100);     // multiply by 100 to get 2 digits mantissa and convert into int
+
+    val = dht.readHumidity();
+    if(! isnan(val))
+      humidity = (int)(val *100);
+
+    Serial.print("Temperature: ");
+    Serial.print((float)temperature/100, 2);
+    Serial.print("; Humidity: ");
+    Serial.println((float)humidity/100, 2);
 
     /* Temperature characteristic
-      Unit is in degrees Celsius with a resolution of 0.01 degrees Celsius
-      Exponent: Decimal, -2
+      Unit is in degrees Celsius with a resolution of 0.01 degrees Celsius. Exponent: Decimal, -2
     */
-    uint16_t charValue;
-    charValue = (int16_t)(temperature *100); // multiply by 100 to get 2 digits mantissa and convert into uint16_t
-    temperatureCharact.setValue(charValue);  // set characteristic value
+    temperatureCharact.setValue(temperature);  // set characteristic value
     temperatureCharact.notify();
 
     // Stessa cosa per umidità
-    charValue = (int16_t)(humidity *100); // multiply by 100 to get 2 digits mantissa and convert into uint16_t
-    humidityCharact.setValue(charValue);  // set characteristic value
+    humidityCharact.setValue(humidity);  // set characteristic value
     humidityCharact.notify();
-
-    delay(5); // bluetooth stack will go into congestion, if too many packets are sent, in 6 hours test i was able to go as low as 3ms
   }
+
   // disconnecting
   if (!deviceConnected && oldDeviceConnected) {
     delay(500); // give the bluetooth stack the chance to get things ready
@@ -132,6 +137,7 @@ void loop() {
     Serial.println("start advertising");
     oldDeviceConnected = deviceConnected;
   }
+
   // connecting
   if (deviceConnected && !oldDeviceConnected) {
     // do stuff here on connecting
